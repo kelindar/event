@@ -8,87 +8,122 @@ import (
 	"sync"
 )
 
-// Bus represents an event bus.
-type Bus struct {
-	lock sync.RWMutex
-	subs map[string][]*handler
+// Event represents an event contract
+type Event interface {
+	Type() uint32
 }
 
-func (e *Bus) setup() {
-	if e.subs == nil {
-		e.subs = make(map[string][]*handler, 8)
+// ------------------------------------- Dispatcher -------------------------------------
+
+// Dispatcher represents an event dispatcher.
+type Dispatcher[T Event] struct {
+	subs sync.Map
+}
+
+// NewDispatcher creates a new dispatcher of events.
+func NewDispatcher[T Event]() *Dispatcher[T] {
+	return &Dispatcher[T]{}
+}
+
+// loadOrStore finds a subscriber group or creates a new one
+func (d *Dispatcher[T]) loadOrStore(key uint32) *group[T] {
+	s, _ := d.subs.LoadOrStore(key, new(group[T]))
+	return s.(*group[T])
+}
+
+// Publish writes an event into the dispatcher
+func (d *Dispatcher[T]) Publish(ev T) {
+	if g, ok := d.subs.Load(ev.Type()); ok {
+		g.(*group[T]).Broadcast(ev)
 	}
 }
 
-// Notify notifies listeners of an event that happened
-func (e *Bus) Notify(event string, value interface{}) {
-	e.lock.RLock()
-	defer e.lock.RUnlock()
-
-	e.setup()
-	if handlers, ok := e.subs[event]; ok {
-		for _, h := range handlers {
-			h.buffer <- value
-		}
-	}
-}
-
-// On registers an event listener on a system
-func (e *Bus) On(event string, callback func(interface{})) context.CancelFunc {
-	e.lock.Lock()
-	defer e.lock.Unlock()
-
-	// Create the handler
-	e.setup()
+// Subscribe subscribes to an callback event
+func (d *Dispatcher[T]) Subscribe(eventType uint32, handler func(T)) context.CancelFunc {
 	ctx, cancel := context.WithCancel(context.Background())
-	subscriber := &handler{
-		buffer:   make(chan interface{}, 1),
-		callback: &callback,
-		cancel:   cancel,
+	sub := &consumer[T]{
+		queue: make(chan T, 1024),
+		exec:  handler,
 	}
 
-	// Add the listener
-	e.subs[event] = append(e.subs[event], subscriber)
-	go subscriber.listen(ctx)
+	// Add to consumer group, if it doesn't exist it will create one
+	group := d.loadOrStore(eventType)
+	group.Add(ctx, sub)
 
-	return e.unsubscribe(event, &callback)
-}
-
-// unsubscribe deregisters an event listener from a system
-func (e *Bus) unsubscribe(event string, callback *func(interface{})) context.CancelFunc {
+	// Return unsubscribe function
 	return func() {
-		e.lock.Lock()
-		defer e.lock.Unlock()
-
-		if handlers, ok := e.subs[event]; ok {
-			clean := make([]*handler, 0, len(handlers))
-			for _, h := range handlers {
-				if h.callback != callback { // Compare address
-					clean = append(clean, h)
-				} else {
-					h.cancel()
-				}
-			}
-		}
+		d.unsubscribe(eventType, sub) // Remove from the list
+		cancel()                      // Stop async processing
 	}
 }
 
-// -------------------------------------------------------------------------------------------
-
-type handler struct {
-	buffer   chan interface{}
-	callback *func(interface{})
-	cancel   context.CancelFunc
+// Count counts the number of subscribers
+func (d *Dispatcher[T]) count(eventType uint32) int {
+	return len(d.loadOrStore(eventType).subs)
 }
 
-// Listen listens on the buffer and invokes the callback
-func (h *handler) listen(ctx context.Context) {
+// unsubscribe removes the subscriber from the list of subscribers
+func (d *Dispatcher[T]) unsubscribe(eventType uint32, sub *consumer[T]) {
+	group := d.loadOrStore(eventType)
+	group.Del(sub)
+}
+
+// ------------------------------------- Subscriber List -------------------------------------
+
+// consumer represents a consumer with a message queue
+type consumer[T Event] struct {
+	queue chan T  // Message buffer
+	exec  func(T) // Process callback
+}
+
+// Listen listens to the event queue and processes events
+func (s *consumer[T]) Listen(ctx context.Context) {
 	for {
 		select {
+		case ev := <-s.queue:
+			s.exec(ev)
 		case <-ctx.Done():
 			return
-		case value := <-h.buffer:
-			(*h.callback)(value)
 		}
 	}
+}
+
+// group represents a consumer group
+type group[T Event] struct {
+	sync.RWMutex
+	subs []*consumer[T]
+}
+
+// Broadcast sends an event to all consumers
+func (s *group[T]) Broadcast(ev T) {
+	s.RLock()
+	defer s.RUnlock()
+	for _, sub := range s.subs {
+		sub.queue <- ev
+	}
+}
+
+// Add adds a subscriber to the list
+func (s *group[T]) Add(ctx context.Context, sub *consumer[T]) {
+	go sub.Listen(ctx)
+
+	// Add the consumer to the list of active consumers
+	s.Lock()
+	s.subs = append(s.subs, sub)
+	s.Unlock()
+}
+
+// Del removes a subscriber from the list
+func (s *group[T]) Del(sub *consumer[T]) {
+	s.Lock()
+	defer s.Unlock()
+
+	// Search and remove the subscriber
+	subs := make([]*consumer[T], 0, len(s.subs))
+	for _, v := range s.subs {
+		if v != sub {
+			subs = append(subs, v)
+		}
+	}
+	s.subs = subs
 }
