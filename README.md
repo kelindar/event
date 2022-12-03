@@ -14,39 +14,37 @@ This repository contains a **simple, in-process event dispatcher** to be used to
 ```go
 // Various event types
 const EventA = 0x01
-const EventB = 0x02
 
 // Event type for testing purposes
 type myEvent struct{
-    kind uint32
     Data string
 }
 
 // Type returns the event type
 func (ev myEvent) Type() uint32 {
-	return ev.kind
+	return EventA
 }
 ```
 
-When publishing events, you can create a `Dispatcher[T]` which allows to `Publish()` and `Subscribe()` to various event types.
+When publishing events, you can create a `Dispatcher` which is then used as a target of generic `event.Publish[T]()` and `event.Subscribe[T]()` functions to publish and subscribe to various event types respectively.
 
 ```go
-bus := event.NewDispatcher[Event]()
+bus := event.NewDispatcher()
 
 // Subcribe to event A, and automatically unsubscribe at the end
-defer bus.Subscribe(EventA, func(e Event) {
+defer event.Subscribe(bus, func(e Event) {
     println("(consumer 1)", e.Data)
 })()
 
 // Subcribe to event A, and automatically unsubscribe at the end
-defer bus.Subscribe(EventA, func(e Event) {
+defer event.Subscribe(bus, func(e Event) {
     println("(consumer 2)", e.Data)
 })()
 
 // Publish few events
-bus.Publish(newEventA("event 1"))
-bus.Publish(newEventA("event 2"))
-bus.Publish(newEventA("event 3"))
+event.Publish(bus, newEventA("event 1"))
+event.Publish(bus, newEventA("event 2"))
+event.Publish(bus, newEventA("event 3"))
 ```
 
 It should output something along these lines, where order is not guaranteed given that both subscribers are processing messages asyncrhonously.
