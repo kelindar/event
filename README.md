@@ -26,6 +26,24 @@ func (ev myEvent) Type() uint32 {
 }
 ```
 
+## Using Default Dispatcher
+
+For convenience, this package provides a default global dispatcher that can be used with `On()` and `Emit()` package-level functions.
+
+```go
+// Subcribe to event A, and automatically unsubscribe at the end
+defer event.On(func(e Event) {
+    println("(consumer)", e.Data)
+})()
+
+// Publish few events
+event.Emit(newEventA("event 1"))
+event.Emit(newEventA("event 2"))
+event.Emit(newEventA("event 3"))
+```
+
+## Using Specific Dispatcher
+
 When publishing events, you can create a `Dispatcher` which is then used as a target of generic `event.Publish[T]()` and `event.Subscribe[T]()` functions to publish and subscribe to various event types respectively.
 
 ```go
