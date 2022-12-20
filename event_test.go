@@ -21,11 +21,11 @@ BenchmarkEvent/100-consumers-8       	   97951	     12699 ns/op	   9795055 msg	 
 func BenchmarkEvent(b *testing.B) {
 	for _, subs := range []int{1, 10, 100} {
 		b.Run(fmt.Sprintf("%d-consumers", subs), func(b *testing.B) {
-			var count uint64
+			var count atomic.Int64
 			d := NewDispatcher()
 			for i := 0; i < subs; i++ {
 				defer Subscribe(d, func(ev MyEvent1) {
-					atomic.AddUint64(&count, 1)
+					count.Add(1)
 				})()
 			}
 
@@ -34,7 +34,10 @@ func BenchmarkEvent(b *testing.B) {
 			for n := 0; n < b.N; n++ {
 				Publish(d, MyEvent1{})
 			}
-			b.ReportMetric(float64(count), "msg")
+
+			messages := float64(count.Load())
+			b.ReportMetric(messages, "ev")
+			b.ReportMetric(messages/float64(b.N), "ev/op")
 		})
 	}
 }

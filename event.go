@@ -39,12 +39,13 @@ func Subscribe[T Event](broker *Dispatcher, handler func(T)) context.CancelFunc 
 func SubscribeTo[T Event](broker *Dispatcher, eventType uint32, handler func(T)) context.CancelFunc {
 	ctx, cancel := context.WithCancel(context.Background())
 	sub := &consumer[T]{
-		queue: make(chan T, 1024),
-		exec:  handler,
+		exec: handler,
 	}
 
 	// Add to consumer group, if it doesn't exist it will create one
-	s, _ := broker.subs.LoadOrStore(eventType, new(group[T]))
+	s, _ := broker.subs.LoadOrStore(eventType, &group[T]{
+		cond: sync.NewCond(new(sync.Mutex)),
+	})
 	group := groupOf[T](eventType, s)
 	group.Add(ctx, sub)
 
@@ -80,55 +81,76 @@ func groupOf[T Event](eventType uint32, subs any) *group[T] {
 	panic(errConflict[T](eventType, subs))
 }
 
-// ------------------------------------- Subscriber List -------------------------------------
+// ------------------------------------- Subscriber -------------------------------------
 
 // consumer represents a consumer with a message queue
 type consumer[T Event] struct {
-	queue chan T  // Message buffer
+	cond  *sync.Cond
+	queue []T
 	exec  func(T) // Process callback
 }
 
 // Listen listens to the event queue and processes events
-func (s *consumer[T]) Listen(ctx context.Context) {
+func (s *consumer[T]) Listen(c *sync.Cond) {
+	s.cond = c
+	work := make([]T, 0, 128)
+
 	for {
-		select {
-		case ev := <-s.queue:
-			s.exec(ev)
-		case <-ctx.Done():
-			return
+		c.L.Lock()
+		for len(s.queue) == 0 {
+			s.cond.Wait()
+		}
+
+		// Grow the work buffer if needed
+		if cap(work) < len(s.queue) {
+			work = make([]T, len(s.queue))
+		}
+
+		// Copy the work we need to do into the work buffer
+		work = work[:len(s.queue)]
+		copy(work, s.queue)
+		s.queue = s.queue[:0]
+		c.L.Unlock()
+
+		// Outside of the critical section, process the work
+		for i := 0; i < len(work); i++ {
+			s.exec(work[i])
 		}
 	}
 }
 
+// ------------------------------------- Subscriber Group -------------------------------------
+
 // group represents a consumer group
 type group[T Event] struct {
-	sync.RWMutex
+	cond *sync.Cond
 	subs []*consumer[T]
 }
 
 // Broadcast sends an event to all consumers
 func (s *group[T]) Broadcast(ev T) {
-	s.RLock()
-	defer s.RUnlock()
+	s.cond.L.Lock()
 	for _, sub := range s.subs {
-		sub.queue <- ev
+		sub.queue = append(sub.queue, ev)
 	}
+	s.cond.L.Unlock()
+	s.cond.Broadcast()
 }
 
 // Add adds a subscriber to the list
 func (s *group[T]) Add(ctx context.Context, sub *consumer[T]) {
-	go sub.Listen(ctx)
+	go sub.Listen(s.cond)
 
 	// Add the consumer to the list of active consumers
-	s.Lock()
+	s.cond.L.Lock()
 	s.subs = append(s.subs, sub)
-	s.Unlock()
+	s.cond.L.Unlock()
 }
 
 // Del removes a subscriber from the list
 func (s *group[T]) Del(sub *consumer[T]) {
-	s.Lock()
-	defer s.Unlock()
+	s.cond.L.Lock()
+	defer s.cond.L.Unlock()
 
 	// Search and remove the subscriber
 	subs := make([]*consumer[T], 0, len(s.subs))
