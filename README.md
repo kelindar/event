@@ -80,7 +80,10 @@ It should output something along these lines, where order is not guaranteed give
 
 ```
 cpu: Intel(R) Core(TM) i7-9700K CPU @ 3.60GHz
-BenchmarkEvent/1-consumers-8   	10021444   119.1 ns/op  10021301 msg   0 B/op   0 allocs/op
-BenchmarkEvent/10-consumers-8  	  799999    1595 ns/op   7999915 msg   0 B/op   0 allocs/op
-BenchmarkEvent/100-consumers-8 	   99048   14308 ns/op   9904769 msg   0 B/op   0 allocs/op
+BenchmarkEvent/1x1-8        69634809       38.07 ns/op      26245794 ev/s        0 B/op     0 allocs/op
+BenchmarkEvent/1x10-8       15903538       188.2 ns/op      53029988 ev/s       10 B/op     0 allocs/op
+BenchmarkEvent/1x100-8       1345704        1679 ns/op      59502067 ev/s       68 B/op     0 allocs/op
+BenchmarkEvent/10x1-8        6537975       504.9 ns/op      19796366 ev/s        0 B/op     0 allocs/op
+BenchmarkEvent/10x10-8       1740412        1979 ns/op      50472108 ev/s       87 B/op     0 allocs/op
+BenchmarkEvent/10x100-8       160111       17376 ns/op      57290578 ev/s     2616 B/op     0 allocs/op
 ```
