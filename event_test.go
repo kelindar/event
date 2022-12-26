@@ -16,21 +16,22 @@ func TestPublish(t *testing.T) {
 	d := NewDispatcher()
 	var wg sync.WaitGroup
 
-	// Subscribe
+	// Subscribe, must be received in order
 	var count int64
 	defer Subscribe(d, func(ev MyEvent1) {
-		atomic.AddInt64(&count, 1)
+		assert.Equal(t, int(atomic.AddInt64(&count, 1)), ev.Number)
 		wg.Done()
 	})()
 
 	// Publish
-	wg.Add(2)
-	Publish(d, MyEvent1{})
-	Publish(d, MyEvent1{})
+	wg.Add(3)
+	Publish(d, MyEvent1{Number: 1})
+	Publish(d, MyEvent1{Number: 2})
+	Publish(d, MyEvent1{Number: 3})
 
 	// Wait and check
 	wg.Wait()
-	assert.Equal(t, int64(2), count)
+	assert.Equal(t, int64(3), count)
 }
 
 func TestUnsubscribe(t *testing.T) {

@@ -39,7 +39,8 @@ func Subscribe[T Event](broker *Dispatcher, handler func(T)) context.CancelFunc 
 func SubscribeTo[T Event](broker *Dispatcher, eventType uint32, handler func(T)) context.CancelFunc {
 	ctx, cancel := context.WithCancel(context.Background())
 	sub := &consumer[T]{
-		exec: handler,
+		exec:  handler,
+		queue: make([]T, 0, 128),
 	}
 
 	// Add to consumer group, if it doesn't exist it will create one
@@ -85,16 +86,14 @@ func groupOf[T Event](eventType uint32, subs any) *group[T] {
 
 // consumer represents a consumer with a message queue
 type consumer[T Event] struct {
-	stop  bool
-	cond  *sync.Cond
-	queue []T
+	queue []T     // Current work queue
 	exec  func(T) // Process callback
+	stop  bool
 }
 
 // Listen listens to the event queue and processes events
 func (s *consumer[T]) Listen(c *sync.Cond) {
-	s.cond = c
-	work := make([]T, 0, 128)
+	pending := make([]T, 0, 128)
 
 	for {
 		c.L.Lock()
@@ -104,24 +103,20 @@ func (s *consumer[T]) Listen(c *sync.Cond) {
 				c.L.Unlock()
 				return
 			default:
-				s.cond.Wait()
+				c.Wait()
 			}
 		}
 
-		// Grow the work buffer if needed
-		if cap(work) < len(s.queue) {
-			work = make([]T, len(s.queue))
-		}
-
-		// Copy the work we need to do into the work buffer
-		work = work[:len(s.queue)]
-		copy(work, s.queue)
+		// Swap buffers and reset the current queue
+		temp := s.queue
+		s.queue = pending
+		pending = temp
 		s.queue = s.queue[:0]
 		c.L.Unlock()
 
 		// Outside of the critical section, process the work
-		for i := 0; i < len(work); i++ {
-			s.exec(work[i])
+		for i := 0; i < len(pending); i++ {
+			s.exec(pending[i])
 		}
 	}
 }

@@ -15,12 +15,12 @@ import (
 
 /*
 cpu: Intel(R) Core(TM) i7-9700K CPU @ 3.60GHz
-BenchmarkEvent/1x1-8         	18729601	        59.74 ns/op	  16739743 ev/s	       0 B/op	       0 allocs/op
-BenchmarkEvent/10x1-8        	  704184	      1749 ns/op	   5718222 ev/s	       0 B/op	       0 allocs/op
-BenchmarkEvent/1x10-8        	 2838696	       357.5 ns/op	  27975523 ev/s	       0 B/op	       0 allocs/op
-BenchmarkEvent/10x10-8       	  179293	     12922 ns/op	   7738928 ev/s	       1 B/op	       0 allocs/op
-BenchmarkEvent/1x100-8       	  249906	      4945 ns/op	  20223782 ev/s	       9 B/op	       0 allocs/op
-BenchmarkEvent/10x100-8      	   51558	     38953 ns/op	  25657300 ev/s	     257 B/op	       0 allocs/op
+BenchmarkEvent/1x1-8         	19471857	        61.37 ns/op	  16295560 ev/s	       0 B/op	       0 allocs/op
+BenchmarkEvent/10x1-8        	  701856	      1772 ns/op	   5643499 ev/s	       0 B/op	       0 allocs/op
+BenchmarkEvent/1x10-8        	 4033690	       389.9 ns/op	  25646847 ev/s	       0 B/op	       0 allocs/op
+BenchmarkEvent/10x10-8       	  107130	     12355 ns/op	   8093423 ev/s	       2 B/op	       0 allocs/op
+BenchmarkEvent/1x100-8       	  378753	      3680 ns/op	  27177107 ev/s	      16 B/op	       0 allocs/op
+BenchmarkEvent/10x100-8      	   28020	     46035 ns/op	  21738149 ev/s	     308 B/op	       0 allocs/op
 */
 func BenchmarkEvent(b *testing.B) {
 	for _, subs := range []int{1, 10, 100} {
