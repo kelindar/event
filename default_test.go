@@ -8,33 +8,47 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 )
 
 /*
 cpu: Intel(R) Core(TM) i7-9700K CPU @ 3.60GHz
-BenchmarkDefault/1-consumers-8         	 9965634	       120.6 ns/op	   9965601 msg	       0 B/op	       0 allocs/op
-BenchmarkDefault/10-consumers-8        	  800031	      1365 ns/op	   8000305 msg	       0 B/op	       0 allocs/op
-BenchmarkDefault/100-consumers-8       	   82742	     15891 ns/op	   8274183 msg	       0 B/op	       0 allocs/op
+BenchmarkEvent/1x1-8         	18729601	        59.74 ns/op	  16739743 ev/s	       0 B/op	       0 allocs/op
+BenchmarkEvent/10x1-8        	  704184	      1749 ns/op	   5718222 ev/s	       0 B/op	       0 allocs/op
+BenchmarkEvent/1x10-8        	 2838696	       357.5 ns/op	  27975523 ev/s	       0 B/op	       0 allocs/op
+BenchmarkEvent/10x10-8       	  179293	     12922 ns/op	   7738928 ev/s	       1 B/op	       0 allocs/op
+BenchmarkEvent/1x100-8       	  249906	      4945 ns/op	  20223782 ev/s	       9 B/op	       0 allocs/op
+BenchmarkEvent/10x100-8      	   51558	     38953 ns/op	  25657300 ev/s	     257 B/op	       0 allocs/op
 */
-func BenchmarkDefault(b *testing.B) {
+func BenchmarkEvent(b *testing.B) {
 	for _, subs := range []int{1, 10, 100} {
-		b.Run(fmt.Sprintf("%d-consumers", subs), func(b *testing.B) {
-			var count uint64
-			for i := 0; i < subs; i++ {
-				defer On(func(ev MyEvent1) {
-					atomic.AddUint64(&count, 1)
-				})()
-			}
+		for _, topics := range []int{1, 10} {
+			b.Run(fmt.Sprintf("%dx%d", topics, subs), func(b *testing.B) {
+				var count atomic.Int64
+				for i := 0; i < subs; i++ {
+					for id := 0; id < topics; id++ {
+						defer OnType(uint32(id), func(ev MyEvent3) {
+							count.Add(1)
+						})()
+					}
+				}
 
-			b.ReportAllocs()
-			b.ResetTimer()
-			for n := 0; n < b.N; n++ {
-				Emit(MyEvent1{})
-			}
-			b.ReportMetric(float64(count), "msg")
-		})
+				start := time.Now()
+				b.ReportAllocs()
+				b.ResetTimer()
+				for n := 0; n < b.N; n++ {
+					for id := 0; id < topics; id++ {
+						Emit(MyEvent3{ID: id})
+					}
+				}
+
+				elapsed := time.Since(start)
+				rate := float64(count.Load()) / elapsed.Seconds()
+				b.ReportMetric(rate, "ev/s")
+			})
+		}
 	}
 }
 

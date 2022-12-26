@@ -8,50 +8,9 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 )
-
-/*
-cpu: Intel(R) Core(TM) i7-9700K CPU @ 3.60GHz
-BenchmarkEvent/1x1-8         	23606526	        55.70 ns/op	  17952620 ev/s	       0 B/op	       0 allocs/op
-BenchmarkEvent/10x1-8        	  750093	      1677 ns/op	   5963737 ev/s	       0 B/op	       0 allocs/op
-BenchmarkEvent/1x10-8        	 2992201	       398.1 ns/op	  25120369 ev/s	       0 B/op	       0 allocs/op
-BenchmarkEvent/10x10-8       	  102986	     12018 ns/op	   8320753 ev/s	       1 B/op	       0 allocs/op
-BenchmarkEvent/1x100-8       	  247375	      5470 ns/op	  18279493 ev/s	      13 B/op	       0 allocs/op
-BenchmarkEvent/10x100-8      	   57990	     42819 ns/op	  23353052 ev/s	     209 B/op	       0 allocs/op
-*/
-func BenchmarkEvent(b *testing.B) {
-	for _, subs := range []int{1, 10, 100} {
-		for _, topics := range []int{1, 10} {
-			b.Run(fmt.Sprintf("%dx%d", topics, subs), func(b *testing.B) {
-				var count atomic.Int64
-				d := NewDispatcher()
-				for i := 0; i < subs; i++ {
-					for id := 0; id < topics; id++ {
-						defer SubscribeTo(d, uint32(id), func(ev MyEvent3) {
-							count.Add(1)
-						})()
-					}
-				}
-
-				start := time.Now()
-				b.ReportAllocs()
-				b.ResetTimer()
-				for n := 0; n < b.N; n++ {
-					for id := 0; id < topics; id++ {
-						Publish(d, MyEvent3{ID: id})
-					}
-				}
-
-				elapsed := time.Since(start)
-				rate := float64(count.Load()) / elapsed.Seconds()
-				b.ReportMetric(rate, "ev/s")
-			})
-		}
-	}
-}
 
 func TestPublish(t *testing.T) {
 	d := NewDispatcher()

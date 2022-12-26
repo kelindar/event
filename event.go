@@ -85,6 +85,7 @@ func groupOf[T Event](eventType uint32, subs any) *group[T] {
 
 // consumer represents a consumer with a message queue
 type consumer[T Event] struct {
+	stop  bool
 	cond  *sync.Cond
 	queue []T
 	exec  func(T) // Process callback
@@ -98,7 +99,13 @@ func (s *consumer[T]) Listen(c *sync.Cond) {
 	for {
 		c.L.Lock()
 		for len(s.queue) == 0 {
-			s.cond.Wait()
+			switch {
+			case s.stop:
+				c.L.Unlock()
+				return
+			default:
+				s.cond.Wait()
+			}
 		}
 
 		// Grow the work buffer if needed
@@ -153,6 +160,7 @@ func (s *group[T]) Del(sub *consumer[T]) {
 	defer s.cond.L.Unlock()
 
 	// Search and remove the subscriber
+	sub.stop = true
 	subs := make([]*consumer[T], 0, len(s.subs))
 	for _, v := range s.subs {
 		if v != sub {
