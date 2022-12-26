@@ -37,7 +37,6 @@ func Subscribe[T Event](broker *Dispatcher, handler func(T)) context.CancelFunc 
 
 // SubscribeTo subscribes to an event with the specified event type.
 func SubscribeTo[T Event](broker *Dispatcher, eventType uint32, handler func(T)) context.CancelFunc {
-	ctx, cancel := context.WithCancel(context.Background())
 	sub := &consumer[T]{
 		exec:  handler,
 		queue: make([]T, 0, 128),
@@ -48,12 +47,11 @@ func SubscribeTo[T Event](broker *Dispatcher, eventType uint32, handler func(T))
 		cond: sync.NewCond(new(sync.Mutex)),
 	})
 	group := groupOf[T](eventType, s)
-	group.Add(ctx, sub)
+	group.Add(sub)
 
 	// Return unsubscribe function
 	return func() {
 		group.Del(sub)
-		cancel() // Stop async processing
 	}
 }
 
@@ -140,7 +138,7 @@ func (s *group[T]) Broadcast(ev T) {
 }
 
 // Add adds a subscriber to the list
-func (s *group[T]) Add(ctx context.Context, sub *consumer[T]) {
+func (s *group[T]) Add(sub *consumer[T]) {
 	go sub.Listen(s.cond)
 
 	// Add the consumer to the list of active consumers
