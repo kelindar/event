@@ -28,7 +28,7 @@ func BenchmarkEvent(b *testing.B) {
 			b.Run(fmt.Sprintf("%dx%d", topics, subs), func(b *testing.B) {
 				var count atomic.Int64
 				for i := 0; i < subs; i++ {
-					for id := 0; id < topics; id++ {
+					for id := 10; id < 10+topics; id++ {
 						defer OnType(uint32(id), func(ev MyEvent3) {
 							count.Add(1)
 						})()
@@ -39,7 +39,7 @@ func BenchmarkEvent(b *testing.B) {
 				b.ReportAllocs()
 				b.ResetTimer()
 				for n := 0; n < b.N; n++ {
-					for id := 0; id < topics; id++ {
+					for id := 10; id < 10+topics; id++ {
 						Emit(MyEvent3{ID: id})
 					}
 				}
