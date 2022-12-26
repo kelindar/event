@@ -37,17 +37,13 @@ func Subscribe[T Event](broker *Dispatcher, handler func(T)) context.CancelFunc 
 
 // SubscribeTo subscribes to an event with the specified event type.
 func SubscribeTo[T Event](broker *Dispatcher, eventType uint32, handler func(T)) context.CancelFunc {
-	sub := &consumer[T]{
-		exec:  handler,
-		queue: make([]T, 0, 128),
-	}
 
 	// Add to consumer group, if it doesn't exist it will create one
 	s, _ := broker.subs.LoadOrStore(eventType, &group[T]{
 		cond: sync.NewCond(new(sync.Mutex)),
 	})
 	group := groupOf[T](eventType, s)
-	group.Add(sub)
+	sub := group.Add(handler)
 
 	// Return unsubscribe function
 	return func() {
@@ -138,13 +134,20 @@ func (s *group[T]) Broadcast(ev T) {
 }
 
 // Add adds a subscriber to the list
-func (s *group[T]) Add(sub *consumer[T]) {
-	go sub.Listen(s.cond)
+func (s *group[T]) Add(handler func(T)) *consumer[T] {
+	sub := &consumer[T]{
+		exec:  handler,
+		queue: make([]T, 0, 128),
+	}
 
 	// Add the consumer to the list of active consumers
 	s.cond.L.Lock()
 	s.subs = append(s.subs, sub)
 	s.cond.L.Unlock()
+
+	// Start listening
+	go sub.Listen(s.cond)
+	return sub
 }
 
 // Del removes a subscriber from the list
