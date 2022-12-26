@@ -90,6 +90,16 @@ func TestPublishDifferentType(t *testing.T) {
 	})
 }
 
+func TestCloseDispatcher(t *testing.T) {
+	d := NewDispatcher()
+	defer SubscribeTo(d, TypeEvent1, func(ev MyEvent2) {})()
+
+	assert.NoError(t, d.Close())
+	assert.Panics(t, func() {
+		SubscribeTo(d, TypeEvent1, func(ev MyEvent2) {})
+	})
+}
+
 func TestMatrix(t *testing.T) {
 	const amount = 1000
 	for _, subs := range []int{1, 10, 100} {

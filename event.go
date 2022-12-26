@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"strings"
 	"sync"
+	"time"
 )
 
 // Event represents an event contract
@@ -21,11 +22,32 @@ type Event interface {
 // Dispatcher represents an event dispatcher.
 type Dispatcher struct {
 	subs sync.Map
+	done chan struct{} // Cancellation
+	df   time.Duration // Flush interval
 }
 
 // NewDispatcher creates a new dispatcher of events.
 func NewDispatcher() *Dispatcher {
-	return &Dispatcher{}
+	return &Dispatcher{
+		df:   500 * time.Microsecond,
+		done: make(chan struct{}),
+	}
+}
+
+// Close closes the dispatcher
+func (d *Dispatcher) Close() error {
+	close(d.done)
+	return nil
+}
+
+// isClosed returns whether the dispatcher is closed or not
+func (d *Dispatcher) isClosed() bool {
+	select {
+	case <-d.done:
+		return true
+	default:
+		return false
+	}
 }
 
 // Subscribe subscribes to an event, the type of the event will be automatically
@@ -37,13 +59,21 @@ func Subscribe[T Event](broker *Dispatcher, handler func(T)) context.CancelFunc 
 
 // SubscribeTo subscribes to an event with the specified event type.
 func SubscribeTo[T Event](broker *Dispatcher, eventType uint32, handler func(T)) context.CancelFunc {
+	if broker.isClosed() {
+		panic(errClosed)
+	}
 
 	// Add to consumer group, if it doesn't exist it will create one
-	s, _ := broker.subs.LoadOrStore(eventType, &group[T]{
+	s, loaded := broker.subs.LoadOrStore(eventType, &group[T]{
 		cond: sync.NewCond(new(sync.Mutex)),
 	})
 	group := groupOf[T](eventType, s)
 	sub := group.Add(handler)
+
+	// Start flushing asynchronously if we just created a new group
+	if !loaded {
+		go group.Process(broker.df, broker.done)
+	}
 
 	// Return unsubscribe function
 	return func() {
@@ -122,6 +152,19 @@ type group[T Event] struct {
 	subs []*consumer[T]
 }
 
+// Process periodically broadcasts events
+func (s *group[T]) Process(interval time.Duration, done chan struct{}) {
+	ticker := time.NewTicker(interval)
+	for {
+		select {
+		case <-done:
+			return
+		case <-ticker.C:
+			s.cond.Broadcast()
+		}
+	}
+}
+
 // Broadcast sends an event to all consumers
 func (s *group[T]) Broadcast(ev T) {
 	s.cond.L.Lock()
@@ -129,7 +172,6 @@ func (s *group[T]) Broadcast(ev T) {
 		sub.queue = append(sub.queue, ev)
 	}
 	s.cond.L.Unlock()
-	s.cond.Broadcast()
 }
 
 // Add adds a subscriber to the list
@@ -165,6 +207,8 @@ func (s *group[T]) Del(sub *consumer[T]) {
 }
 
 // ------------------------------------- Debugging -------------------------------------
+
+var errClosed = fmt.Errorf("event dispatcher is closed")
 
 // Count returns the number of subscribers in this group
 func (s *group[T]) Count() int {
