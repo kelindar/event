@@ -14,31 +14,40 @@ import (
 
 /*
 cpu: Intel(R) Core(TM) i7-9700K CPU @ 3.60GHz
-BenchmarkEvent/1-consumers-8         	10240418	       116.8 ns/op	  10240023 msg	       0 B/op	       0 allocs/op
-BenchmarkEvent/10-consumers-8        	  923197	      1396 ns/op	   9231961 msg	       0 B/op	       0 allocs/op
-BenchmarkEvent/100-consumers-8       	   97951	     12699 ns/op	   9795055 msg	       0 B/op	       0 allocs/op
+BenchmarkEvent/1x1-8         	23700472	        54.79 ns/op	  23700403 ev	         1.000 ev/op	       0 B/op	       0 allocs/op
+BenchmarkEvent/10x1-8        	  749990	      1697 ns/op	   7499457 ev	         9.999 ev/op	       0 B/op	       0 allocs/op
+BenchmarkEvent/1x10-8        	 2860024	       417.6 ns/op	  28599542 ev	        10.00 ev/op	       0 B/op	       0 allocs/op
+BenchmarkEvent/10x10-8       	  100000	     13270 ns/op	   9999952 ev	       100.0 ev/op	       1 B/op	       0 allocs/op
+BenchmarkEvent/1x100-8       	  226356	      5612 ns/op	  22634862 ev	       100.0 ev/op	       3 B/op	       0 allocs/op
+BenchmarkEvent/10x100-8      	   61760	     39021 ns/op	  61758698 ev	      1000 ev/op	      36 B/op	       0 allocs/op
 */
 func BenchmarkEvent(b *testing.B) {
 	for _, subs := range []int{1, 10, 100} {
-		b.Run(fmt.Sprintf("%d-consumers", subs), func(b *testing.B) {
-			var count atomic.Int64
-			d := NewDispatcher()
-			for i := 0; i < subs; i++ {
-				defer Subscribe(d, func(ev MyEvent1) {
-					count.Add(1)
-				})()
-			}
+		for _, topics := range []int{1, 10} {
+			b.Run(fmt.Sprintf("%dx%d", topics, subs), func(b *testing.B) {
+				var count atomic.Int64
+				d := NewDispatcher()
+				for i := 0; i < subs; i++ {
+					for id := 0; id < topics; id++ {
+						defer SubscribeTo(d, uint32(id), func(ev MyEvent3) {
+							count.Add(1)
+						})()
+					}
+				}
 
-			b.ReportAllocs()
-			b.ResetTimer()
-			for n := 0; n < b.N; n++ {
-				Publish(d, MyEvent1{})
-			}
+				b.ReportAllocs()
+				b.ResetTimer()
+				for n := 0; n < b.N; n++ {
+					for id := 0; id < topics; id++ {
+						Publish(d, MyEvent3{ID: id})
+					}
+				}
 
-			messages := float64(count.Load())
-			b.ReportMetric(messages, "ev")
-			b.ReportMetric(messages/float64(b.N), "ev/op")
-		})
+				messages := float64(count.Load())
+				b.ReportMetric(messages, "ev")
+				b.ReportMetric(messages/float64(b.N), "ev/op")
+			})
+		}
 	}
 }
 
@@ -119,6 +128,39 @@ func TestPublishDifferentType(t *testing.T) {
 	})
 }
 
+func TestMatrix(t *testing.T) {
+	const amount = 1000
+	for _, subs := range []int{1, 10, 100} {
+		for _, topics := range []int{1, 10} {
+			expected := subs * topics * amount
+			t.Run(fmt.Sprintf("%dx%d", topics, subs), func(t *testing.T) {
+				var count atomic.Int64
+				var wg sync.WaitGroup
+				wg.Add(expected)
+
+				d := NewDispatcher()
+				for i := 0; i < subs; i++ {
+					for id := 0; id < topics; id++ {
+						defer SubscribeTo(d, uint32(id), func(ev MyEvent3) {
+							count.Add(1)
+							wg.Done()
+						})()
+					}
+				}
+
+				for n := 0; n < amount; n++ {
+					for id := 0; id < topics; id++ {
+						go Publish(d, MyEvent3{ID: id})
+					}
+				}
+
+				wg.Wait()
+				assert.Equal(t, expected, int(count.Load()))
+			})
+		}
+	}
+}
+
 // ------------------------------------- Test Events -------------------------------------
 
 const (
@@ -137,3 +179,9 @@ type MyEvent2 struct {
 }
 
 func (t MyEvent2) Type() uint32 { return TypeEvent2 }
+
+type MyEvent3 struct {
+	ID int
+}
+
+func (t MyEvent3) Type() uint32 { return uint32(t.ID) }
