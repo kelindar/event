@@ -4,6 +4,7 @@
 package event
 
 import (
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -15,21 +16,22 @@ func TestPublish(t *testing.T) {
 	d := NewDispatcher()
 	var wg sync.WaitGroup
 
-	// Subscribe
+	// Subscribe, must be received in order
 	var count int64
 	defer Subscribe(d, func(ev MyEvent1) {
-		atomic.AddInt64(&count, 1)
+		assert.Equal(t, int(atomic.AddInt64(&count, 1)), ev.Number)
 		wg.Done()
 	})()
 
 	// Publish
-	wg.Add(2)
-	Publish(d, MyEvent1{})
-	Publish(d, MyEvent1{})
+	wg.Add(3)
+	Publish(d, MyEvent1{Number: 1})
+	Publish(d, MyEvent1{Number: 2})
+	Publish(d, MyEvent1{Number: 3})
 
 	// Wait and check
 	wg.Wait()
-	assert.Equal(t, int64(2), count)
+	assert.Equal(t, int64(3), count)
 }
 
 func TestUnsubscribe(t *testing.T) {
@@ -88,6 +90,49 @@ func TestPublishDifferentType(t *testing.T) {
 	})
 }
 
+func TestCloseDispatcher(t *testing.T) {
+	d := NewDispatcher()
+	defer SubscribeTo(d, TypeEvent1, func(ev MyEvent2) {})()
+
+	assert.NoError(t, d.Close())
+	assert.Panics(t, func() {
+		SubscribeTo(d, TypeEvent1, func(ev MyEvent2) {})
+	})
+}
+
+func TestMatrix(t *testing.T) {
+	const amount = 1000
+	for _, subs := range []int{1, 10, 100} {
+		for _, topics := range []int{1, 10} {
+			expected := subs * topics * amount
+			t.Run(fmt.Sprintf("%dx%d", topics, subs), func(t *testing.T) {
+				var count atomic.Int64
+				var wg sync.WaitGroup
+				wg.Add(expected)
+
+				d := NewDispatcher()
+				for i := 0; i < subs; i++ {
+					for id := 0; id < topics; id++ {
+						defer SubscribeTo(d, uint32(id), func(ev MyEvent3) {
+							count.Add(1)
+							wg.Done()
+						})()
+					}
+				}
+
+				for n := 0; n < amount; n++ {
+					for id := 0; id < topics; id++ {
+						go Publish(d, MyEvent3{ID: id})
+					}
+				}
+
+				wg.Wait()
+				assert.Equal(t, expected, int(count.Load()))
+			})
+		}
+	}
+}
+
 // ------------------------------------- Test Events -------------------------------------
 
 const (
@@ -106,3 +151,9 @@ type MyEvent2 struct {
 }
 
 func (t MyEvent2) Type() uint32 { return TypeEvent2 }
+
+type MyEvent3 struct {
+	ID int
+}
+
+func (t MyEvent3) Type() uint32 { return uint32(t.ID) }

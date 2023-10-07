@@ -79,8 +79,11 @@ It should output something along these lines, where order is not guaranteed give
 ## Benchmarks
 
 ```
-cpu: Intel(R) Core(TM) i7-9700K CPU @ 3.60GHz
-BenchmarkEvent/1-consumers-8   	10021444   119.1 ns/op  10021301 msg   0 B/op   0 allocs/op
-BenchmarkEvent/10-consumers-8  	  799999    1595 ns/op   7999915 msg   0 B/op   0 allocs/op
-BenchmarkEvent/100-consumers-8 	   99048   14308 ns/op   9904769 msg   0 B/op   0 allocs/op
+cpu: 13th Gen Intel(R) Core(TM) i7-13700K
+BenchmarkEvent/1x1-24         	38709926	        31.94 ns/op	        30.89 million/s	       1 B/op	       0 allocs/op
+BenchmarkEvent/1x10-24        	 8107938	       133.7 ns/op	        74.76 million/s	      45 B/op	       0 allocs/op
+BenchmarkEvent/1x100-24       	  774168	      1341 ns/op	        72.65 million/s	     373 B/op	       0 allocs/op
+BenchmarkEvent/10x1-24        	 5755402	       301.1 ns/op	        32.98 million/s	       7 B/op	       0 allocs/op
+BenchmarkEvent/10x10-24       	  750022	      1503 ns/op	        64.47 million/s	     438 B/op	       0 allocs/op
+BenchmarkEvent/10x100-24      	   69363	     14878 ns/op	        67.11 million/s	    3543 B/op	       0 allocs/op
 ```

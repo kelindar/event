@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"strings"
 	"sync"
+	"time"
 )
 
 // Event represents an event contract
@@ -21,11 +22,32 @@ type Event interface {
 // Dispatcher represents an event dispatcher.
 type Dispatcher struct {
 	subs sync.Map
+	done chan struct{} // Cancellation
+	df   time.Duration // Flush interval
 }
 
 // NewDispatcher creates a new dispatcher of events.
 func NewDispatcher() *Dispatcher {
-	return &Dispatcher{}
+	return &Dispatcher{
+		df:   500 * time.Microsecond,
+		done: make(chan struct{}),
+	}
+}
+
+// Close closes the dispatcher
+func (d *Dispatcher) Close() error {
+	close(d.done)
+	return nil
+}
+
+// isClosed returns whether the dispatcher is closed or not
+func (d *Dispatcher) isClosed() bool {
+	select {
+	case <-d.done:
+		return true
+	default:
+		return false
+	}
 }
 
 // Subscribe subscribes to an event, the type of the event will be automatically
@@ -37,21 +59,25 @@ func Subscribe[T Event](broker *Dispatcher, handler func(T)) context.CancelFunc 
 
 // SubscribeTo subscribes to an event with the specified event type.
 func SubscribeTo[T Event](broker *Dispatcher, eventType uint32, handler func(T)) context.CancelFunc {
-	ctx, cancel := context.WithCancel(context.Background())
-	sub := &consumer[T]{
-		queue: make(chan T, 1024),
-		exec:  handler,
+	if broker.isClosed() {
+		panic(errClosed)
 	}
 
 	// Add to consumer group, if it doesn't exist it will create one
-	s, _ := broker.subs.LoadOrStore(eventType, new(group[T]))
+	s, loaded := broker.subs.LoadOrStore(eventType, &group[T]{
+		cond: sync.NewCond(new(sync.Mutex)),
+	})
 	group := groupOf[T](eventType, s)
-	group.Add(ctx, sub)
+	sub := group.Add(handler)
+
+	// Start flushing asynchronously if we just created a new group
+	if !loaded {
+		go group.Process(broker.df, broker.done)
+	}
 
 	// Return unsubscribe function
 	return func() {
 		group.Del(sub)
-		cancel() // Stop async processing
 	}
 }
 
@@ -80,57 +106,97 @@ func groupOf[T Event](eventType uint32, subs any) *group[T] {
 	panic(errConflict[T](eventType, subs))
 }
 
-// ------------------------------------- Subscriber List -------------------------------------
+// ------------------------------------- Subscriber -------------------------------------
 
 // consumer represents a consumer with a message queue
 type consumer[T Event] struct {
-	queue chan T  // Message buffer
-	exec  func(T) // Process callback
+	queue []T  // Current work queue
+	stop  bool // Stop signal
 }
 
 // Listen listens to the event queue and processes events
-func (s *consumer[T]) Listen(ctx context.Context) {
+func (s *consumer[T]) Listen(c *sync.Cond, fn func(T)) {
+	pending := make([]T, 0, 128)
+
 	for {
-		select {
-		case ev := <-s.queue:
-			s.exec(ev)
-		case <-ctx.Done():
-			return
+		c.L.Lock()
+		for len(s.queue) == 0 {
+			switch {
+			case s.stop:
+				c.L.Unlock()
+				return
+			default:
+				c.Wait()
+			}
+		}
+
+		// Swap buffers and reset the current queue
+		temp := s.queue
+		s.queue = pending
+		pending = temp
+		s.queue = s.queue[:0]
+		c.L.Unlock()
+
+		// Outside of the critical section, process the work
+		for i := 0; i < len(pending); i++ {
+			fn(pending[i])
 		}
 	}
 }
 
+// ------------------------------------- Subscriber Group -------------------------------------
+
 // group represents a consumer group
 type group[T Event] struct {
-	sync.RWMutex
+	cond *sync.Cond
 	subs []*consumer[T]
+}
+
+// Process periodically broadcasts events
+func (s *group[T]) Process(interval time.Duration, done chan struct{}) {
+	ticker := time.NewTicker(interval)
+	for {
+		select {
+		case <-done:
+			return
+		case <-ticker.C:
+			s.cond.Broadcast()
+		}
+	}
 }
 
 // Broadcast sends an event to all consumers
 func (s *group[T]) Broadcast(ev T) {
-	s.RLock()
-	defer s.RUnlock()
+	s.cond.L.Lock()
 	for _, sub := range s.subs {
-		sub.queue <- ev
+		sub.queue = append(sub.queue, ev)
 	}
+	s.cond.L.Unlock()
 }
 
 // Add adds a subscriber to the list
-func (s *group[T]) Add(ctx context.Context, sub *consumer[T]) {
-	go sub.Listen(ctx)
+func (s *group[T]) Add(handler func(T)) *consumer[T] {
+	sub := &consumer[T]{
+		queue: make([]T, 0, 128),
+	}
 
 	// Add the consumer to the list of active consumers
-	s.Lock()
+	s.cond.L.Lock()
 	s.subs = append(s.subs, sub)
-	s.Unlock()
+	s.cond.L.Unlock()
+
+	// Start listening
+	go sub.Listen(s.cond, handler)
+	return sub
 }
 
 // Del removes a subscriber from the list
 func (s *group[T]) Del(sub *consumer[T]) {
-	s.Lock()
-	defer s.Unlock()
+	s.cond.L.Lock()
+	defer s.cond.L.Unlock()
 
 	// Search and remove the subscriber
+	sub.stop = true
 	subs := make([]*consumer[T], 0, len(s.subs))
 	for _, v := range s.subs {
 		if v != sub {
@@ -141,6 +207,8 @@ func (s *group[T]) Del(sub *consumer[T]) {
 }
 
 // ------------------------------------- Debugging -------------------------------------
+
+var errClosed = fmt.Errorf("event dispatcher is closed")
 
 // Count returns the number of subscribers in this group
 func (s *group[T]) Count() int {
