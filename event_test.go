@@ -4,40 +4,12 @@
 package event
 
 import (
-	"fmt"
 	"sync"
 	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 )
-
-/*
-cpu: Intel(R) Core(TM) i7-9700K CPU @ 3.60GHz
-BenchmarkEvent/1-consumers-8         	10240418	       116.8 ns/op	  10240023 msg	       0 B/op	       0 allocs/op
-BenchmarkEvent/10-consumers-8        	  923197	      1396 ns/op	   9231961 msg	       0 B/op	       0 allocs/op
-BenchmarkEvent/100-consumers-8       	   97951	     12699 ns/op	   9795055 msg	       0 B/op	       0 allocs/op
-*/
-func BenchmarkEvent(b *testing.B) {
-	for _, subs := range []int{1, 10, 100} {
-		b.Run(fmt.Sprintf("%d-consumers", subs), func(b *testing.B) {
-			var count uint64
-			d := NewDispatcher()
-			for i := 0; i < subs; i++ {
-				defer Subscribe(d, func(ev MyEvent1) {
-					atomic.AddUint64(&count, 1)
-				})()
-			}
-
-			b.ReportAllocs()
-			b.ResetTimer()
-			for n := 0; n < b.N; n++ {
-				Publish(d, MyEvent1{})
-			}
-			b.ReportMetric(float64(count), "msg")
-		})
-	}
-}
 
 func TestPublish(t *testing.T) {
 	d := NewDispatcher()

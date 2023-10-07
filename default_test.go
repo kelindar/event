@@ -13,14 +13,14 @@ import (
 )
 
 /*
-cpu: Intel(R) Core(TM) i7-9700K CPU @ 3.60GHz
-BenchmarkDefault/1-consumers-8         	 9965634	       120.6 ns/op	   9965601 msg	       0 B/op	       0 allocs/op
-BenchmarkDefault/10-consumers-8        	  800031	      1365 ns/op	   8000305 msg	       0 B/op	       0 allocs/op
-BenchmarkDefault/100-consumers-8       	   82742	     15891 ns/op	   8274183 msg	       0 B/op	       0 allocs/op
+cpu: 13th Gen Intel(R) Core(TM) i7-13700K
+BenchmarkEmit/1-subs-24         	13407880	        87.10 ns/op	        13.41 million	       0 B/op	       0 allocs/op
+BenchmarkEmit/10-subs-24        	 1000000	      1012 ns/op	        10.00 million	       0 B/op	       0 allocs/op
+BenchmarkEmit/100-subs-24       	  103896	     11714 ns/op	        10.39 million	       0 B/op	       0 allocs/op
 */
-func BenchmarkDefault(b *testing.B) {
+func BenchmarkEmit(b *testing.B) {
 	for _, subs := range []int{1, 10, 100} {
-		b.Run(fmt.Sprintf("%d-consumers", subs), func(b *testing.B) {
+		b.Run(fmt.Sprintf("%d-subs", subs), func(b *testing.B) {
 			var count uint64
 			for i := 0; i < subs; i++ {
 				defer On(func(ev MyEvent1) {
@@ -33,7 +33,7 @@ func BenchmarkDefault(b *testing.B) {
 			for n := 0; n < b.N; n++ {
 				Emit(MyEvent1{})
 			}
-			b.ReportMetric(float64(count), "msg")
+			b.ReportMetric(float64(count)/1e6, "million")
 		})
 	}
 }
