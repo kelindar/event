@@ -8,6 +8,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 )
@@ -131,6 +132,162 @@ func TestMatrix(t *testing.T) {
 			})
 		}
 	}
+}
+
+func TestConcurrentSubscriptionRace(t *testing.T) {
+	// This test specifically targets the race condition that occurs when multiple
+	// goroutines try to subscribe to different event types simultaneously.
+	// Without the CAS loop, subscriptions could be lost due to registry corruption.
+
+	const numGoroutines = 100
+	const numEventTypes = 50
+
+	d := NewDispatcher()
+	var wg sync.WaitGroup
+
+	// Track which event types actually got subscribed
+	subscribedTypes := make(map[uint32]bool)
+	var subscribedMu sync.Mutex
+
+	// Channel to collect received events
+	eventCh := make(chan uint32, numGoroutines*numEventTypes)
+
+	wg.Add(numGoroutines)
+
+	// Start multiple goroutines that subscribe to different event types concurrently
+	for i := 0; i < numGoroutines; i++ {
+		go func(goroutineID int) {
+			defer wg.Done()
+
+			// Each goroutine subscribes to a unique event type
+			eventType := uint32(goroutineID%numEventTypes + 1000) // Offset to avoid collision with other tests			// Subscribe to the event type
+			SubscribeTo(d, eventType, func(ev MyEvent3) {
+				eventCh <- eventType
+			})
+
+			// Record that this type was subscribed
+			subscribedMu.Lock()
+			subscribedTypes[eventType] = true
+			subscribedMu.Unlock()
+		}(i)
+	}
+
+	// Wait for all subscriptions to complete
+	wg.Wait()
+
+	// Verify that all expected event types are properly registered
+	subscribedMu.Lock()
+	expectedTypes := len(subscribedTypes)
+	subscribedMu.Unlock()
+
+	// Small delay to ensure all subscriptions are fully processed
+	time.Sleep(10 * time.Millisecond)
+
+	// Publish events to each subscribed type
+	publishWg := sync.WaitGroup{}
+	publishWg.Add(expectedTypes)
+
+	subscribedMu.Lock()
+	for eventType := range subscribedTypes {
+		go func(et uint32) {
+			defer publishWg.Done()
+			Publish(d, MyEvent3{ID: int(et)})
+		}(eventType)
+	}
+	subscribedMu.Unlock()
+	publishWg.Wait()
+
+	// Wait for all events to be processed
+	time.Sleep(20 * time.Millisecond)
+
+	// Collect all received events
+	close(eventCh)
+	receivedTypes := make(map[uint32]bool)
+	for eventType := range eventCh {
+		receivedTypes[eventType] = true
+	}
+
+	// Verify that all subscribed types received their events
+	// This would fail if the race condition caused registry corruption
+	assert.Equal(t, len(subscribedTypes), len(receivedTypes),
+		"Race condition detected: some subscriptions were lost due to registry corruption")
+
+	for eventType := range subscribedTypes {
+		assert.True(t, receivedTypes[eventType],
+			"Event type %d was subscribed but did not receive its event", eventType)
+	}
+}
+
+func TestConcurrentHandlerRegistration(t *testing.T) {
+	const numGoroutines = 100
+
+	// Test concurrent subscriptions to the same event type
+	t.Run("SameEventType", func(t *testing.T) {
+		d := NewDispatcher()
+		var handlerCount int64
+		var wg sync.WaitGroup
+
+		// Start multiple goroutines subscribing to the same event type (0x1)
+		for i := 0; i < numGoroutines; i++ {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				SubscribeTo(d, uint32(0x1), func(ev MyEvent1) {
+					atomic.AddInt64(&handlerCount, 1)
+				})
+			}()
+		}
+
+		wg.Wait()
+
+		// Verify all handlers were registered by publishing an event
+		atomic.StoreInt64(&handlerCount, 0)
+		Publish(d, MyEvent1{})
+
+		// Small delay to ensure all handlers have executed
+		time.Sleep(10 * time.Millisecond)
+
+		assert.Equal(t, int64(numGoroutines), atomic.LoadInt64(&handlerCount),
+			"Not all handlers were registered due to race condition")
+	})
+
+	// Test concurrent subscriptions to different event types
+	t.Run("DifferentEventTypes", func(t *testing.T) {
+		d := NewDispatcher()
+		var wg sync.WaitGroup
+		receivedEvents := make(map[uint32]*int64)
+
+		// Create multiple event types and subscribe concurrently
+		for i := 0; i < numGoroutines; i++ {
+			eventType := uint32(100 + i)
+			counter := new(int64)
+			receivedEvents[eventType] = counter
+
+			wg.Add(1)
+			go func(et uint32, cnt *int64) {
+				defer wg.Done()
+				SubscribeTo(d, et, func(ev MyEvent3) {
+					atomic.AddInt64(cnt, 1)
+				})
+			}(eventType, counter)
+		}
+
+		wg.Wait()
+
+		// Publish events to all types
+		for eventType := uint32(100); eventType < uint32(100+numGoroutines); eventType++ {
+			Publish(d, MyEvent3{ID: int(eventType)})
+		}
+
+		// Small delay to ensure all handlers have executed
+		time.Sleep(10 * time.Millisecond)
+
+		// Verify all event types received their events
+		for eventType, counter := range receivedEvents {
+			assert.Equal(t, int64(1), atomic.LoadInt64(counter),
+				"Event type %d did not receive its event", eventType)
+		}
+	})
 }
 
 // ------------------------------------- Test Events -------------------------------------
