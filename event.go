@@ -7,8 +7,10 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -17,21 +19,34 @@ type Event interface {
 	Type() uint32
 }
 
+// registry holds an immutable sorted array of event mappings
+type registry struct {
+	keys []uint32 // Event types (sorted)
+	subs []any    // Corresponding subscribers
+}
+
 // ------------------------------------- Dispatcher -------------------------------------
 
 // Dispatcher represents an event dispatcher.
 type Dispatcher struct {
-	subs sync.Map
-	done chan struct{} // Cancellation
-	df   time.Duration // Flush interval
+	subs atomic.Pointer[registry] // Atomic pointer to immutable array
+	done chan struct{}            // Cancellation
+	df   time.Duration            // Flush interval
+	mu   sync.Mutex               // Only for writes (subscribe/unsubscribe)
 }
 
 // NewDispatcher creates a new dispatcher of events.
 func NewDispatcher() *Dispatcher {
-	return &Dispatcher{
+	d := &Dispatcher{
 		df:   500 * time.Microsecond,
 		done: make(chan struct{}),
 	}
+
+	d.subs.Store(&registry{
+		keys: make([]uint32, 0, 16),
+		subs: make([]any, 0, 16),
+	})
+	return d
 }
 
 // Close closes the dispatcher
@@ -50,6 +65,28 @@ func (d *Dispatcher) isClosed() bool {
 	}
 }
 
+// findGroup performs a lock-free binary search for the event type
+func (d *Dispatcher) findGroup(eventType uint32) any {
+	reg := d.subs.Load()
+	keys := reg.keys
+
+	// Inlined binary search for better cache locality
+	left, right := 0, len(keys)
+	for left < right {
+		mid := left + (right-left)/2
+		if keys[mid] < eventType {
+			left = mid + 1
+		} else {
+			right = mid
+		}
+	}
+
+	if left < len(keys) && keys[left] == eventType {
+		return reg.subs[left]
+	}
+	return nil
+}
+
 // Subscribe subscribes to an event, the type of the event will be automatically
 // inferred from the provided type. Must be constant for this to work.
 func Subscribe[T Event](broker *Dispatcher, handler func(T)) context.CancelFunc {
@@ -63,35 +100,71 @@ func SubscribeTo[T Event](broker *Dispatcher, eventType uint32, handler func(T))
 		panic(errClosed)
 	}
 
-	// Add to consumer group, if it doesn't exist it will create one
-	s, loaded := broker.subs.LoadOrStore(eventType, &group[T]{
-		cond: sync.NewCond(new(sync.Mutex)),
-	})
-	group := groupOf[T](eventType, s)
-	sub := group.Add(handler)
+	broker.mu.Lock()
+	defer broker.mu.Unlock()
 
-	// Start flushing asynchronously if we just created a new group
-	if !loaded {
-		go group.Process(broker.df, broker.done)
+	// Check if group already exists
+	if existing := broker.findGroup(eventType); existing != nil {
+		grp := groupOf[T](eventType, existing)
+		sub := grp.Add(handler)
+		return func() {
+			grp.Del(sub)
+		}
 	}
 
-	// Return unsubscribe function
+	// Create new grp
+	grp := &group[T]{cond: sync.NewCond(new(sync.Mutex))}
+	sub := grp.Add(handler)
+
+	// Copy-on-write with CAS loop: insert new entry in sorted position
+	for {
+		old := broker.subs.Load()
+		idx := sort.Search(len(old.keys), func(i int) bool {
+			return old.keys[i] >= eventType
+		})
+
+		// Create new arrays with space for one more element
+		newKeys := make([]uint32, len(old.keys)+1)
+		newSubs := make([]any, len(old.subs)+1)
+
+		// Copy elements before insertion point
+		copy(newKeys[:idx], old.keys[:idx])
+		copy(newSubs[:idx], old.subs[:idx])
+
+		// Insert new element
+		newKeys[idx] = eventType
+		newSubs[idx] = grp
+
+		// Copy elements after insertion point
+		copy(newKeys[idx+1:], old.keys[idx:])
+		copy(newSubs[idx+1:], old.subs[idx:])
+
+		// Atomically swap the registry
+		newReg := &registry{keys: newKeys, subs: newSubs}
+		if broker.subs.CompareAndSwap(old, newReg) {
+			break
+		}
+	}
+
+	// Start processing
+	go grp.Process(broker.df, broker.done)
 	return func() {
-		group.Del(sub)
+		grp.Del(sub)
 	}
 }
 
 // Publish writes an event into the dispatcher
 func Publish[T Event](broker *Dispatcher, ev T) {
-	if s, ok := broker.subs.Load(ev.Type()); ok {
-		group := groupOf[T](ev.Type(), s)
+	eventType := ev.Type()
+	if sub := broker.findGroup(eventType); sub != nil {
+		group := groupOf[T](eventType, sub)
 		group.Broadcast(ev)
 	}
 }
 
 // Count counts the number of subscribers, this is for testing only.
 func (d *Dispatcher) count(eventType uint32) int {
-	if group, ok := d.subs.Load(eventType); ok {
+	if group := d.findGroup(eventType); group != nil {
 		return group.(interface{ Count() int }).Count()
 	}
 	return 0

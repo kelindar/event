@@ -80,10 +80,10 @@ It should output something along these lines, where order is not guaranteed give
 
 ```
 cpu: 13th Gen Intel(R) Core(TM) i7-13700K
-BenchmarkEvent/1x1-24         	38709926	        31.94 ns/op	        30.89 million/s	       1 B/op	       0 allocs/op
-BenchmarkEvent/1x10-24        	 8107938	       133.7 ns/op	        74.76 million/s	      45 B/op	       0 allocs/op
-BenchmarkEvent/1x100-24       	  774168	      1341 ns/op	        72.65 million/s	     373 B/op	       0 allocs/op
-BenchmarkEvent/10x1-24        	 5755402	       301.1 ns/op	        32.98 million/s	       7 B/op	       0 allocs/op
-BenchmarkEvent/10x10-24       	  750022	      1503 ns/op	        64.47 million/s	     438 B/op	       0 allocs/op
-BenchmarkEvent/10x100-24      	   69363	     14878 ns/op	        67.11 million/s	    3543 B/op	       0 allocs/op
+BenchmarkEvent/1x1-24          164887946       14.55 ns/op     68.70 million/s      0 B/op     0 allocs/op
+BenchmarkEvent/1x10-24          28896586       80.06 ns/op     88.02 million/s    204 B/op     0 allocs/op
+BenchmarkEvent/1x100-24          1535168        1397 ns/op     71.57 million/s     26 B/op     0 allocs/op
+BenchmarkEvent/10x1-24          14288467       256.1 ns/op     39.03 million/s      0 B/op     0 allocs/op
+BenchmarkEvent/10x10-24          1624722        1265 ns/op     78.59 million/s     65 B/op     0 allocs/op
+BenchmarkEvent/10x100-24          164623       12767 ns/op     78.33 million/s    456 B/op     0 allocs/op
 ```
