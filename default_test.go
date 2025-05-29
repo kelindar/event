@@ -14,13 +14,14 @@ import (
 )
 
 /*
+go test -bench=. -benchmem -benchtime=10s
 cpu: 13th Gen Intel(R) Core(TM) i7-13700K
-BenchmarkEvent/1x1-24         	38709926	        31.94 ns/op	        30.89 million/s	       1 B/op	       0 allocs/op
-BenchmarkEvent/1x10-24        	 8107938	       133.7 ns/op	        74.76 million/s	      45 B/op	       0 allocs/op
-BenchmarkEvent/1x100-24       	  774168	      1341 ns/op	        72.65 million/s	     373 B/op	       0 allocs/op
-BenchmarkEvent/10x1-24        	 5755402	       301.1 ns/op	        32.98 million/s	       7 B/op	       0 allocs/op
-BenchmarkEvent/10x10-24       	  750022	      1503 ns/op	        64.47 million/s	     438 B/op	       0 allocs/op
-BenchmarkEvent/10x100-24      	   69363	     14878 ns/op	        67.11 million/s	    3543 B/op	       0 allocs/op
+BenchmarkEvent/1x1-24                   814403188               14.72 ns/op             67.95 million/s        0 B/op          0 allocs/op
+BenchmarkEvent/1x10-24                  161012098               84.61 ns/op             90.93 million/s      196 B/op          0 allocs/op
+BenchmarkEvent/1x100-24                  7890922              1409 ns/op                70.95 million/s       10 B/op          0 allocs/op
+BenchmarkEvent/10x1-24                  72358305               155.3 ns/op              64.38 million/s        0 B/op          0 allocs/op
+BenchmarkEvent/10x10-24                  7632547              1315 ns/op                76.05 million/s       30 B/op          0 allocs/op
+BenchmarkEvent/10x100-24                  832560             13541 ns/op                73.84 million/s      210 B/op          0 allocs/op
 */
 func BenchmarkEvent(b *testing.B) {
 	for _, topics := range []int{1, 10} {
@@ -50,6 +51,23 @@ func BenchmarkEvent(b *testing.B) {
 			})
 		}
 	}
+}
+
+/*
+cpu: 13th Gen Intel(R) Core(TM) i7-13700K
+BenchmarkSubcribeConcurrent-24    	 1826686	       606.3 ns/op	    1648 B/op	       5 allocs/op
+*/
+func BenchmarkSubscribeConcurrent(b *testing.B) {
+	d := NewDispatcher()
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			unsub := Subscribe(d, func(ev MyEvent1) {})
+			unsub()
+		}
+	})
 }
 
 func TestDefaultPublish(t *testing.T) {

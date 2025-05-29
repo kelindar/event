@@ -22,7 +22,7 @@ type Event interface {
 // registry holds an immutable sorted array of event mappings
 type registry struct {
 	keys []uint32 // Event types (sorted)
-	subs []any    // Corresponding subscribers
+	grps []any    // Corresponding subscribers
 }
 
 // ------------------------------------- Dispatcher -------------------------------------
@@ -44,7 +44,7 @@ func NewDispatcher() *Dispatcher {
 
 	d.subs.Store(&registry{
 		keys: make([]uint32, 0, 16),
-		subs: make([]any, 0, 16),
+		grps: make([]any, 0, 16),
 	})
 	return d
 }
@@ -82,7 +82,7 @@ func (d *Dispatcher) findGroup(eventType uint32) any {
 	}
 
 	if left < len(keys) && keys[left] == eventType {
-		return reg.subs[left]
+		return reg.grps[left]
 	}
 	return nil
 }
@@ -116,35 +116,31 @@ func SubscribeTo[T Event](broker *Dispatcher, eventType uint32, handler func(T))
 	grp := &group[T]{cond: sync.NewCond(new(sync.Mutex))}
 	sub := grp.Add(handler)
 
-	// Copy-on-write with CAS loop: insert new entry in sorted position
-	for {
-		old := broker.subs.Load()
-		idx := sort.Search(len(old.keys), func(i int) bool {
-			return old.keys[i] >= eventType
-		})
+	// Copy-on-write: insert new entry in sorted position
+	old := broker.subs.Load()
+	idx := sort.Search(len(old.keys), func(i int) bool {
+		return old.keys[i] >= eventType
+	})
 
-		// Create new arrays with space for one more element
-		newKeys := make([]uint32, len(old.keys)+1)
-		newSubs := make([]any, len(old.subs)+1)
+	// Create new arrays with space for one more element
+	newKeys := make([]uint32, len(old.keys)+1)
+	newGrps := make([]any, len(old.grps)+1)
 
-		// Copy elements before insertion point
-		copy(newKeys[:idx], old.keys[:idx])
-		copy(newSubs[:idx], old.subs[:idx])
+	// Copy elements before insertion point
+	copy(newKeys[:idx], old.keys[:idx])
+	copy(newGrps[:idx], old.grps[:idx])
 
-		// Insert new element
-		newKeys[idx] = eventType
-		newSubs[idx] = grp
+	// Insert new element
+	newKeys[idx] = eventType
+	newGrps[idx] = grp
 
-		// Copy elements after insertion point
-		copy(newKeys[idx+1:], old.keys[idx:])
-		copy(newSubs[idx+1:], old.subs[idx:])
+	// Copy elements after insertion point
+	copy(newKeys[idx+1:], old.keys[idx:])
+	copy(newGrps[idx+1:], old.grps[idx:])
 
-		// Atomically swap the registry
-		newReg := &registry{keys: newKeys, subs: newSubs}
-		if broker.subs.CompareAndSwap(old, newReg) {
-			break
-		}
-	}
+	// Atomically store the new registry (mutex ensures no concurrent writers)
+	newReg := &registry{keys: newKeys, grps: newGrps}
+	broker.subs.Store(newReg)
 
 	// Start processing
 	go grp.Process(broker.df, broker.done)
@@ -205,14 +201,13 @@ func (s *consumer[T]) Listen(c *sync.Cond, fn func(T)) {
 
 		// Swap buffers and reset the current queue
 		temp := s.queue
-		s.queue = pending
+		s.queue = pending[:0]
 		pending = temp
-		s.queue = s.queue[:0]
 		c.L.Unlock()
 
 		// Outside of the critical section, process the work
-		for i := 0; i < len(pending); i++ {
-			fn(pending[i])
+		for _, event := range pending {
+			fn(event)
 		}
 	}
 }
@@ -228,6 +223,7 @@ type group[T Event] struct {
 // Process periodically broadcasts events
 func (s *group[T]) Process(interval time.Duration, done chan struct{}) {
 	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
 	for {
 		select {
 		case <-done:
@@ -250,7 +246,7 @@ func (s *group[T]) Broadcast(ev T) {
 // Add adds a subscriber to the list
 func (s *group[T]) Add(handler func(T)) *consumer[T] {
 	sub := &consumer[T]{
-		queue: make([]T, 0, 128),
+		queue: make([]T, 0, 64),
 	}
 
 	// Add the consumer to the list of active consumers
@@ -270,13 +266,13 @@ func (s *group[T]) Del(sub *consumer[T]) {
 
 	// Search and remove the subscriber
 	sub.stop = true
-	subs := make([]*consumer[T], 0, len(s.subs))
-	for _, v := range s.subs {
-		if v != sub {
-			subs = append(subs, v)
+	for i, v := range s.subs {
+		if v == sub {
+			copy(s.subs[i:], s.subs[i+1:])
+			s.subs = s.subs[:len(s.subs)-1]
+			break
 		}
 	}
-	s.subs = subs
 }
 
 // ------------------------------------- Debugging -------------------------------------
