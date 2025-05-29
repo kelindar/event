@@ -41,7 +41,7 @@ func NewDispatcher() *Dispatcher {
 	d := &Dispatcher{
 		df:       500 * time.Microsecond,
 		done:     make(chan struct{}),
-		maxQueue: 1e5, // Default max queue size per consumer
+		maxQueue: 50000, // 50k * 20 (df) = 1 million events / second
 	}
 
 	d.subs.Store(&registry{
