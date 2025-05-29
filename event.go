@@ -29,17 +29,19 @@ type registry struct {
 
 // Dispatcher represents an event dispatcher.
 type Dispatcher struct {
-	subs atomic.Pointer[registry] // Atomic pointer to immutable array
-	done chan struct{}            // Cancellation
-	df   time.Duration            // Flush interval
-	mu   sync.Mutex               // Only for writes (subscribe/unsubscribe)
+	subs     atomic.Pointer[registry] // Atomic pointer to immutable array
+	done     chan struct{}            // Cancellation
+	df       time.Duration            // Flush interval
+	maxQueue int                      // Maximum queue size per consumer
+	mu       sync.Mutex               // Only for writes (subscribe/unsubscribe)
 }
 
 // NewDispatcher creates a new dispatcher of events.
 func NewDispatcher() *Dispatcher {
 	d := &Dispatcher{
-		df:   500 * time.Microsecond,
-		done: make(chan struct{}),
+		df:       500 * time.Microsecond,
+		done:     make(chan struct{}),
+		maxQueue: 1e5, // Default max queue size per consumer
 	}
 
 	d.subs.Store(&registry{
@@ -111,9 +113,8 @@ func SubscribeTo[T Event](broker *Dispatcher, eventType uint32, handler func(T))
 			grp.Del(sub)
 		}
 	}
-
 	// Create new grp
-	grp := &group[T]{cond: sync.NewCond(new(sync.Mutex))}
+	grp := &group[T]{cond: sync.NewCond(new(sync.Mutex)), maxQueue: broker.maxQueue}
 	sub := grp.Add(handler)
 
 	// Copy-on-write: insert new entry in sorted position
@@ -216,8 +217,10 @@ func (s *consumer[T]) Listen(c *sync.Cond, fn func(T)) {
 
 // group represents a consumer group
 type group[T Event] struct {
-	cond *sync.Cond
-	subs []*consumer[T]
+	cond     *sync.Cond
+	subs     []*consumer[T]
+	maxQueue int // Maximum queue size per consumer
+	maxLen   int // Current maximum queue length across all consumers
 }
 
 // Process periodically broadcasts events
@@ -229,6 +232,9 @@ func (s *group[T]) Process(interval time.Duration, done chan struct{}) {
 		case <-done:
 			return
 		case <-ticker.C:
+			s.cond.L.Lock()
+			s.maxLen = 0 // Reset high water mark after consumers have processed
+			s.cond.L.Unlock()
 			s.cond.Broadcast()
 		}
 	}
@@ -237,10 +243,28 @@ func (s *group[T]) Process(interval time.Duration, done chan struct{}) {
 // Broadcast sends an event to all consumers
 func (s *group[T]) Broadcast(ev T) {
 	s.cond.L.Lock()
+	defer s.cond.L.Unlock()
+
+	// Backpressure handling: if the maxLen is reached, wait until consumers can process
+	if s.maxLen >= s.maxQueue {
+		for allow := false; !allow; s.cond.Wait() {
+			allow = true
+			for _, sub := range s.subs {
+				if len(sub.queue) >= s.maxQueue {
+					allow = false
+					break
+				}
+			}
+		}
+	}
+
+	// Add to all queues and update high water mark
 	for _, sub := range s.subs {
 		sub.queue = append(sub.queue, ev)
+		if len(sub.queue) > s.maxLen {
+			s.maxLen = len(sub.queue)
+		}
 	}
-	s.cond.L.Unlock()
 }
 
 // Add adds a subscriber to the list
