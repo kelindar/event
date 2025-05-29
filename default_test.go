@@ -5,6 +5,9 @@ package event
 
 import (
 	"fmt"
+	"os"
+	"runtime"
+	"runtime/pprof"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -24,17 +27,56 @@ BenchmarkEvent/10x10-24                  7632547              1315 ns/op        
 BenchmarkEvent/10x100-24                  832560             13541 ns/op                73.84 million/s      210 B/op          0 allocs/op
 */
 func BenchmarkEvent(b *testing.B) {
+	// Enable memory profiling
+	if os.Getenv("MEMPROFILE") != "" {
+		f, err := os.Create("mem.prof")
+		if err != nil {
+			b.Fatal(err)
+		}
+		defer func() {
+			runtime.GC()
+			if err := pprof.WriteHeapProfile(f); err != nil {
+				b.Fatal(err)
+			}
+			f.Close()
+		}()
+	}
+
+	// Enable CPU profiling
+	if os.Getenv("CPUPROFILE") != "" {
+		f, err := os.Create("cpu.prof")
+		if err != nil {
+			b.Fatal(err)
+		}
+		defer f.Close()
+		if err := pprof.StartCPUProfile(f); err != nil {
+			b.Fatal(err)
+		}
+		defer pprof.StopCPUProfile()
+	}
+
 	for _, topics := range []int{1, 10} {
 		for _, subs := range []int{1, 10, 100} {
 			b.Run(fmt.Sprintf("%dx%d", topics, subs), func(b *testing.B) {
 				var count atomic.Int64
+				var unsubscribers []func()
+
+				// Create subscribers
 				for i := 0; i < subs; i++ {
 					for id := 10; id < 10+topics; id++ {
-						defer OnType(uint32(id), func(ev MyEvent3) {
+						unsub := OnType(uint32(id), func(ev MyEvent3) {
 							count.Add(1)
-						})()
+						})
+						unsubscribers = append(unsubscribers, unsub)
 					}
 				}
+
+				// Cleanup subscribers after benchmark
+				defer func() {
+					for _, unsub := range unsubscribers {
+						unsub()
+					}
+				}()
 
 				start := time.Now()
 				b.ReportAllocs()
