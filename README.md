@@ -7,6 +7,26 @@
 <a href="https://coveralls.io/github/kelindar/event"><img src="https://coveralls.io/repos/github/kelindar/event/badge.svg" alt="Coverage"></a>
 </p>
 
+## Fast, In-Process Event Dispatcher
+
+This package offers a high-performance, **in-process event dispatcher** for Go, ideal for decoupling modules and enabling asynchronous event handling. It supports both synchronous and asynchronous processing, focusing on speed and simplicity.
+- **High Performance:** Processes millions of events per second, about **10x faster** than channels.
+- **Generic:** Works with any type implementing the `Event` interface.
+- **Asynchronous:** Each subscriber runs in its own goroutine, ensuring non-blocking event handling.
+
+**Use When:**
+- ✅ Decoupling modules within a single Go process.
+- ✅ Implementing lightweight pub/sub or event-driven patterns.
+- ✅ Needing high-throughput, low-latency event dispatching.
+- ✅ Preferring a simple, dependency-free solution.
+
+**Not For:**
+- ❌ Inter-process/service communication (use Kafka, NATS, etc.).
+- ❌ Event persistence, durability, or advanced routing/filtering.
+- ❌ Cross-language/platform scenarios.
+- ❌ Event replay, dead-letter queues, or deduplication.
+- ❌ Heavy subscribe/unsubscribe churn or massive dynamic subscriber counts.
+
 ## Generic In-Process Pub/Sub
 
 This repository contains a **simple, in-process event dispatcher** to be used to decouple internal modules. It provides a generic way to define events, publish and subscribe to them.
@@ -78,12 +98,18 @@ It should output something along these lines, where order is not guaranteed give
 
 ## Benchmarks
 
+Please note that the benchmarks are run on a 13th Gen Intel(R) Core(TM) i7-13700K CPU, and results may vary based on the machine and environment. This one demonstrates the publishing throughput of the event dispatcher, at different number of event types and subscribers.
+
 ```
 cpu: 13th Gen Intel(R) Core(TM) i7-13700K
-BenchmarkEvent/1x1-24          164887946       14.55 ns/op     68.70 million/s      0 B/op     0 allocs/op
-BenchmarkEvent/1x10-24          28896586       80.06 ns/op     88.02 million/s    204 B/op     0 allocs/op
-BenchmarkEvent/1x100-24          1535168        1397 ns/op     71.57 million/s     26 B/op     0 allocs/op
-BenchmarkEvent/10x1-24          14288467       256.1 ns/op     39.03 million/s      0 B/op     0 allocs/op
-BenchmarkEvent/10x10-24          1624722        1265 ns/op     78.59 million/s     65 B/op     0 allocs/op
-BenchmarkEvent/10x100-24          164623       12767 ns/op     78.33 million/s    456 B/op     0 allocs/op
+BenchmarkEvent/1x1-24          14.72 ns/op     67.95 million/s        0 B/op      0 allocs/op
+BenchmarkEvent/1x10-24         84.61 ns/op     90.93 million/s      196 B/op      0 allocs/op
+BenchmarkEvent/1x100-24         1409 ns/op     70.95 million/s       10 B/op      0 allocs/op
+BenchmarkEvent/10x1-24         155.3 ns/op     64.38 million/s        0 B/op      0 allocs/op
+BenchmarkEvent/10x10-24         1315 ns/op     76.05 million/s       30 B/op      0 allocs/op
+BenchmarkEvent/10x100-24       13541 ns/op     73.84 million/s      210 B/op      0 allocs/op
 ```
+
+# License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
