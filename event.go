@@ -245,16 +245,18 @@ func (s *group[T]) Broadcast(ev T) {
 	s.cond.L.Lock()
 	defer s.cond.L.Unlock()
 
-	// Backpressure handling: if the maxLen is reached, wait until consumers can process
-	if s.maxLen >= s.maxQueue {
-		for allow := false; !allow; s.cond.Wait() {
-			allow = true
-			for _, sub := range s.subs {
-				if len(sub.queue) >= s.maxQueue {
-					allow = false
-					break
-				}
+	// Backpressure handling: if any queue is at capacity, wait until consumers can process
+	for s.maxLen >= s.maxQueue {
+		s.maxLen = 0
+		for _, sub := range s.subs {
+			if len(sub.queue) > s.maxLen {
+				s.maxLen = len(sub.queue)
 			}
+		}
+
+		// If still at capacity after update, wait
+		if s.maxLen >= s.maxQueue {
+			s.cond.Wait()
 		}
 	}
 
