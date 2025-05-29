@@ -158,7 +158,7 @@ func TestConcurrentSubscriptionRace(t *testing.T) {
 
 			// Each goroutine subscribes to a unique event type
 			eventType := uint32(goroutineID%numEventTypes + 1000) // Offset to avoid collision with other tests
-			
+
 			// Subscribe to the event type
 			SubscribeTo(d, eventType, func(ev MyEvent3) {
 				atomic.AddInt64(&receivedCount, 1)
@@ -197,7 +197,7 @@ func TestConcurrentSubscriptionRace(t *testing.T) {
 	received := atomic.LoadInt64(&receivedCount)
 	assert.GreaterOrEqual(t, int(received), expectedTypes,
 		"Should have received at least %d events, got %d", expectedTypes, received)
-	
+
 	// Verify that we have the expected number of unique event types
 	assert.Equal(t, numEventTypes, expectedTypes,
 		"Should have exactly %d unique event types", numEventTypes)
@@ -273,6 +273,29 @@ func TestConcurrentHandlerRegistration(t *testing.T) {
 				"Event type %d did not receive its event", eventType)
 		}
 	})
+}
+
+func TestBackpressure(t *testing.T) {
+	d := NewDispatcher()
+	d.maxQueue = 10
+
+	var processedCount int64
+	unsub := SubscribeTo(d, uint32(0x200), func(ev MyEvent3) {
+		atomic.AddInt64(&processedCount, 1)
+	})
+	defer unsub()
+
+	const eventsToPublish = 1000
+	for i := 0; i < eventsToPublish; i++ {
+		Publish(d, MyEvent3{ID: 0x200})
+	}
+
+	time.Sleep(100 * time.Millisecond)
+
+	// Verify all events were eventually processed
+	finalProcessed := atomic.LoadInt64(&processedCount)
+	assert.Equal(t, int64(eventsToPublish), finalProcessed)
+	t.Logf("Events processed: %d/%d", finalProcessed, eventsToPublish)
 }
 
 // ------------------------------------- Test Events -------------------------------------
