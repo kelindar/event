@@ -57,7 +57,7 @@ func BenchmarkEvent(b *testing.B) {
 cpu: 13th Gen Intel(R) Core(TM) i7-13700K
 BenchmarkSubcribeConcurrent-24    	 1826686	       606.3 ns/op	    1648 B/op	       5 allocs/op
 */
-func BenchmarkSubcribeConcurrent(b *testing.B) {
+func BenchmarkSubscribeConcurrent(b *testing.B) {
 	d := NewDispatcher()
 	b.ReportAllocs()
 	b.ResetTimer()
