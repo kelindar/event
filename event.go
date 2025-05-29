@@ -201,14 +201,13 @@ func (s *consumer[T]) Listen(c *sync.Cond, fn func(T)) {
 
 		// Swap buffers and reset the current queue
 		temp := s.queue
-		s.queue = pending
+		s.queue = pending[:0]
 		pending = temp
-		s.queue = s.queue[:0]
 		c.L.Unlock()
 
 		// Outside of the critical section, process the work
-		for i := 0; i < len(pending); i++ {
-			fn(pending[i])
+		for _, event := range pending {
+			fn(event)
 		}
 	}
 }
