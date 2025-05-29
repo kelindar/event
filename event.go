@@ -223,6 +223,7 @@ type group[T Event] struct {
 // Process periodically broadcasts events
 func (s *group[T]) Process(interval time.Duration, done chan struct{}) {
 	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
 	for {
 		select {
 		case <-done:
