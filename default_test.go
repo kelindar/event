@@ -4,96 +4,12 @@
 package event
 
 import (
-	"fmt"
-	"os"
-	"runtime"
-	"runtime/pprof"
 	"sync"
 	"sync/atomic"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 )
-
-/*
-go test -bench=. -benchmem -benchtime=10s
-cpu: 13th Gen Intel(R) Core(TM) i7-13700K
-BenchmarkEvent/1x1-24                   814403188               14.72 ns/op             67.95 million/s        0 B/op          0 allocs/op
-BenchmarkEvent/1x10-24                  161012098               84.61 ns/op             90.93 million/s      196 B/op          0 allocs/op
-BenchmarkEvent/1x100-24                  7890922              1409 ns/op                70.95 million/s       10 B/op          0 allocs/op
-BenchmarkEvent/10x1-24                  72358305               155.3 ns/op              64.38 million/s        0 B/op          0 allocs/op
-BenchmarkEvent/10x10-24                  7632547              1315 ns/op                76.05 million/s       30 B/op          0 allocs/op
-BenchmarkEvent/10x100-24                  832560             13541 ns/op                73.84 million/s      210 B/op          0 allocs/op
-*/
-func BenchmarkEvent(b *testing.B) {
-	// Enable memory profiling
-	if os.Getenv("MEMPROFILE") != "" {
-		f, err := os.Create("mem.prof")
-		if err != nil {
-			b.Fatal(err)
-		}
-		defer func() {
-			runtime.GC()
-			if err := pprof.WriteHeapProfile(f); err != nil {
-				b.Fatal(err)
-			}
-			f.Close()
-		}()
-	}
-
-	// Enable CPU profiling
-	if os.Getenv("CPUPROFILE") != "" {
-		f, err := os.Create("cpu.prof")
-		if err != nil {
-			b.Fatal(err)
-		}
-		defer f.Close()
-		if err := pprof.StartCPUProfile(f); err != nil {
-			b.Fatal(err)
-		}
-		defer pprof.StopCPUProfile()
-	}
-
-	for _, topics := range []int{1, 10} {
-		for _, subs := range []int{1, 10, 100} {
-			b.Run(fmt.Sprintf("%dx%d", topics, subs), func(b *testing.B) {
-				var count atomic.Int64
-				var unsubscribers []func()
-
-				// Create subscribers
-				for i := 0; i < subs; i++ {
-					for id := 10; id < 10+topics; id++ {
-						unsub := OnType(uint32(id), func(ev MyEvent3) {
-							count.Add(1)
-						})
-						unsubscribers = append(unsubscribers, unsub)
-					}
-				}
-
-				// Cleanup subscribers after benchmark
-				defer func() {
-					for _, unsub := range unsubscribers {
-						unsub()
-					}
-				}()
-
-				start := time.Now()
-				b.ReportAllocs()
-				b.ResetTimer()
-				for n := 0; n < b.N; n++ {
-					for id := 10; id < 10+topics; id++ {
-						Emit(MyEvent3{ID: id})
-					}
-				}
-
-				elapsed := time.Since(start)
-				rate := float64(count.Load()) / 1e6 / elapsed.Seconds()
-				b.ReportMetric(rate, "million/s")
-			})
-		}
-	}
-}
 
 /*
 cpu: 13th Gen Intel(R) Core(TM) i7-13700K

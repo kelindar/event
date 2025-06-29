@@ -10,7 +10,7 @@
 ## Fast, In-Process Event Dispatcher
 
 This package offers a high-performance, **in-process event dispatcher** for Go, ideal for decoupling modules and enabling asynchronous event handling. It supports both synchronous and asynchronous processing, focusing on speed and simplicity.
-- **High Performance:** Processes millions of events per second, about **10x faster** than channels.
+- **High Performance:** Processes millions of events per second, about **4x to 10x faster** than channels.
 - **Generic:** Works with any type implementing the `Event` interface.
 - **Asynchronous:** Each subscriber runs in its own goroutine, ensuring non-blocking event handling.
 
@@ -101,13 +101,14 @@ It should output something along these lines, where order is not guaranteed give
 Please note that the benchmarks are run on a 13th Gen Intel(R) Core(TM) i7-13700K CPU, and results may vary based on the machine and environment. This one demonstrates the publishing throughput of the event dispatcher, at different number of event types and subscribers.
 
 ```
-cpu: 13th Gen Intel(R) Core(TM) i7-13700K
-BenchmarkEvent/1x1-24          14.72 ns/op     67.95 million/s        0 B/op      0 allocs/op
-BenchmarkEvent/1x10-24         84.61 ns/op     90.93 million/s      196 B/op      0 allocs/op
-BenchmarkEvent/1x100-24         1409 ns/op     70.95 million/s       10 B/op      0 allocs/op
-BenchmarkEvent/10x1-24         155.3 ns/op     64.38 million/s        0 B/op      0 allocs/op
-BenchmarkEvent/10x10-24         1315 ns/op     76.05 million/s       30 B/op      0 allocs/op
-BenchmarkEvent/10x100-24       13541 ns/op     73.84 million/s      210 B/op      0 allocs/op
+name                 time/op      ops/s        allocs/op    vs channels
+-------------------- ------------ ------------ ------------ ------------------
+1x1                  38.7 ns      25.9M        0             ✅ +4.2x
+1x10                 13.0 ns      77.1M        0             ✅ +12x
+1x100                12.2 ns      81.7M        0             ✅ +7.7x
+10x1                 26.5 ns      37.7M        0             ✅ +6.3x
+10x10                12.2 ns      82.3M        0             ✅ +7.8x
+10x100               12.2 ns      82.0M        0             ✅ +6.6x
 ```
 
 # License
