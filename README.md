@@ -85,7 +85,7 @@ event.Publish(bus, newEventA("event 2"))
 event.Publish(bus, newEventA("event 3"))
 ```
 
-It should output something along these lines, where order is not guaranteed given that both subscribers are processing messages asyncrhonously.
+It should output something along these lines, where order is not guaranteed given that both subscribers are processing messages asynchronously.
 
 ```
 (consumer 2) event 1
